@@ -1,0 +1,593 @@
+-- Amer ESP v3.1: corner box / rainbow / stats / keyboard click / 10s intro | re-execute safe
+
+local env = (getgenv and getgenv()) or _G
+for _, k in ipairs({ "AmerUnload", "AmerAimUnload", "AmerESPUnload", "AmerGodUnload", "AmerMobileUnload", "AmerTestUnload", "AmerLiteUnload" }) do
+	if env[k] then pcall(env[k]) end
+end
+if not game:IsLoaded() then game.Loaded:Wait() end
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+
+local me = Players.LocalPlayer
+while not me do task.wait() me = Players.LocalPlayer end
+
+-- ===== settings =====
+local MAX_DISTANCE = 3000
+local TEAM_CHECK   = true
+local INCLUDE_NPCS = true
+local RAINBOW      = true
+local ON_COLOR     = Color3.fromRGB(46, 160, 67)
+local OFF_COLOR    = Color3.fromRGB(170, 50, 50)
+local NPC_COLOR    = Color3.fromRGB(255, 160, 40)
+local TEAM_COLOR   = Color3.fromRGB(60, 255, 120)
+local CORNER_LEN   = 0.25
+
+local connections = {}
+local function track(c) table.insert(connections, c) return c end
+
+-- ===== rainbow helper =====
+local hueOffset = 0
+RunService.Heartbeat:Connect(function(dt) hueOffset = (hueOffset + dt * 0.4) % 1 end)
+local function rainbowColor(offset)
+	return Color3.fromHSV((hueOffset + offset) % 1, 1, 1)
+end
+
+-- ===== sounds =====
+local playerGui = me:WaitForChild("PlayerGui")
+
+local clickSound = Instance.new("Sound")
+clickSound.SoundId = "rbxassetid://6895079853"
+clickSound.Volume = 1.5  -- louder keyboard click
+clickSound.Parent = playerGui
+
+local akSound = Instance.new("Sound")
+akSound.SoundId = "rbxassetid://104759646592993"
+akSound.Volume = 1
+akSound.Parent = playerGui
+
+local function playClick()
+	clickSound.TimePosition = 0
+	clickSound:Play()
+end
+
+-- ===== gui =====
+local gui = Instance.new("ScreenGui")
+gui.Name = "AmerESP"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 999
+gui.Parent = playerGui
+
+-- ===== INTRO (10 seconds) =====
+local intro = Instance.new("Frame")
+intro.Size = UDim2.fromScale(1, 1)
+intro.BackgroundColor3 = Color3.new(0, 0, 0)
+intro.BackgroundTransparency = 0.3
+intro.BorderSizePixel = 0
+intro.ZIndex = 200
+intro.Parent = gui
+
+local ring = Instance.new("Frame")
+ring.AnchorPoint = Vector2.new(0.5, 0.5)
+ring.Position = UDim2.fromScale(0.5, 0.5)
+ring.Size = UDim2.fromOffset(20, 20)
+ring.BackgroundTransparency = 1
+ring.ZIndex = 201
+ring.Parent = intro
+Instance.new("UICorner", ring).CornerRadius = UDim.new(1, 0)
+local ringStroke = Instance.new("UIStroke", ring)
+ringStroke.Thickness = 3
+ringStroke.Color = Color3.fromRGB(255, 255, 255)
+
+local introLabel = Instance.new("TextLabel")
+introLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+introLabel.Position = UDim2.fromScale(0.5, 0.5)
+introLabel.Size = UDim2.fromOffset(600, 120)
+introLabel.BackgroundTransparency = 1
+introLabel.Text = "Amer"
+introLabel.Font = Enum.Font.GothamBlack
+introLabel.TextSize = 1
+introLabel.TextColor3 = Color3.new(1, 1, 1)
+introLabel.TextTransparency = 1
+introLabel.ZIndex = 202
+introLabel.Parent = intro
+
+local subLabel = Instance.new("TextLabel")
+subLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+subLabel.Position = UDim2.fromScale(0.5, 0.65)
+subLabel.Size = UDim2.fromOffset(400, 36)
+subLabel.BackgroundTransparency = 1
+subLabel.Text = "ESP SYSTEM"
+subLabel.Font = Enum.Font.Gotham
+subLabel.TextSize = 1
+subLabel.TextColor3 = Color3.new(1, 1, 1)
+subLabel.TextTransparency = 1
+subLabel.ZIndex = 202
+subLabel.Parent = intro
+
+for _, side in ipairs({ -1, 1 }) do
+	local line = Instance.new("Frame")
+	line.AnchorPoint = Vector2.new(0.5, 0.5)
+	line.Position = UDim2.fromScale(0.5 + side * 0.22, 0.5)
+	line.Size = UDim2.fromOffset(2, 0)
+	line.BackgroundColor3 = Color3.new(1, 1, 1)
+	line.BorderSizePixel = 0
+	line.ZIndex = 201
+	line.Parent = intro
+	TweenService:Create(line, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, 0.3), {
+		Size = UDim2.fromOffset(2, 80)
+	}):Play()
+end
+
+task.spawn(function()
+	-- play AK sound at start
+	akSound:Play()
+
+	-- ring expand
+	TweenService:Create(ring, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Size = UDim2.fromOffset(220, 220)
+	}):Play()
+	task.wait(0.3)
+
+	-- name appear
+	TweenService:Create(introLabel, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		TextSize = 96, TextTransparency = 0
+	}):Play()
+	TweenService:Create(subLabel, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, 0.2), {
+		TextSize = 18, TextTransparency = 0
+	}):Play()
+
+	-- rainbow loop for 8 seconds (total ~10s with fade)
+	local t = 0
+	local looping = true
+	local conn = RunService.Heartbeat:Connect(function(dt)
+		if not looping then return end
+		t += dt
+		introLabel.TextColor3 = Color3.fromHSV(t * 0.5 % 1, 1, 1)
+		ringStroke.Color = Color3.fromHSV((t * 0.5 + 0.5) % 1, 1, 1)
+	end)
+	task.wait(8)
+	looping = false
+	conn:Disconnect()
+
+	-- fade out (~1.2s)
+	TweenService:Create(intro, TweenInfo.new(0.8, Enum.EasingStyle.Quad), {
+		BackgroundTransparency = 1
+	}):Play()
+	TweenService:Create(introLabel, TweenInfo.new(0.6), { TextTransparency = 1 }):Play()
+	TweenService:Create(subLabel, TweenInfo.new(0.6), { TextTransparency = 1 }):Play()
+	TweenService:Create(ring, TweenInfo.new(0.5), { BackgroundTransparency = 1 }):Play()
+	TweenService:Create(ringStroke, TweenInfo.new(0.5), { Transparency = 1 }):Play()
+	task.wait(1)
+	intro:Destroy()
+end)
+
+-- ===== PANEL =====
+local panel = Instance.new("Frame")
+panel.Size = UDim2.fromOffset(190, 280)
+panel.Position = UDim2.new(0, 12, 0.5, -140)
+panel.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+panel.BackgroundTransparency = 0.1
+panel.BorderSizePixel = 0
+panel.Parent = gui
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 10)
+local panelStroke = Instance.new("UIStroke", panel)
+panelStroke.Thickness = 1.5
+panelStroke.Color = Color3.fromRGB(80, 80, 100)
+
+RunService.Heartbeat:Connect(function()
+	panelStroke.Color = rainbowColor(0)
+end)
+
+local pHeader = Instance.new("TextLabel")
+pHeader.Size = UDim2.new(1, 0, 0, 28)
+pHeader.BackgroundTransparency = 1
+pHeader.Text = "✦ Amer ESP"
+pHeader.Font = Enum.Font.GothamBold
+pHeader.TextSize = 15
+pHeader.TextColor3 = Color3.new(1, 1, 1)
+pHeader.Parent = panel
+
+do -- drag panel
+	local dragging, ds, sp
+	track(pHeader.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging, ds, sp = true, i.Position, panel.Position
+		end
+	end))
+	track(UIS.InputChanged:Connect(function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseMovement) then
+			local d = i.Position - ds
+			panel.Position = UDim2.new(sp.X.Scale, sp.X.Offset + d.X, sp.Y.Scale, sp.Y.Offset + d.Y)
+		end
+	end))
+	track(UIS.InputEnded:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = false
+		end
+	end))
+end
+
+local stats = Instance.new("TextLabel")
+stats.Position = UDim2.new(0, 8, 0, 30)
+stats.Size = UDim2.new(1, -16, 0, 32)
+stats.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+stats.BackgroundTransparency = 0.3
+stats.Font = Enum.Font.Code
+stats.TextSize = 11
+stats.TextColor3 = Color3.fromRGB(220, 220, 220)
+stats.TextWrapped = true
+stats.TextXAlignment = Enum.TextXAlignment.Left
+stats.Text = " ..."
+stats.Parent = panel
+Instance.new("UICorner", stats).CornerRadius = UDim.new(0, 6)
+
+local espOn = false
+local espBtn = Instance.new("TextButton")
+espBtn.Size = UDim2.new(1, -16, 0, 44)
+espBtn.Position = UDim2.new(0, 8, 0, 68)
+espBtn.BackgroundColor3 = OFF_COLOR
+espBtn.TextColor3 = Color3.new(1, 1, 1)
+espBtn.Font = Enum.Font.GothamBold
+espBtn.TextSize = 18
+espBtn.Text = "ESP: OFF"
+espBtn.Parent = panel
+local espBtnStroke = Instance.new("UIStroke", espBtn)
+espBtnStroke.Thickness = 2
+espBtnStroke.Color = Color3.fromRGB(255, 60, 60)
+Instance.new("UICorner", espBtn).CornerRadius = UDim.new(0, 8)
+
+RunService.Heartbeat:Connect(function()
+	if espOn then espBtnStroke.Color = rainbowColor(0.3) end
+end)
+
+local function makeSubToggle(label, y)
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.new(1, -16, 0, 30)
+	b.Position = UDim2.new(0, 8, 0, y)
+	b.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+	b.TextColor3 = Color3.fromRGB(100, 255, 160)
+	b.Font = Enum.Font.Gotham
+	b.TextSize = 13
+	b.Text = "● " .. label .. ": ON"
+	b.Parent = panel
+	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+	return b
+end
+
+local function makeSmallBtn(txt, x, y, cb)
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.fromOffset(32, 28)
+	b.Position = UDim2.new(0, x, 0, y)
+	b.BackgroundColor3 = Color3.fromRGB(50, 50, 65)
+	b.TextColor3 = Color3.new(1, 1, 1)
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = 16
+	b.Text = txt
+	b.Parent = panel
+	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+	track(b.Activated:Connect(cb))
+end
+
+local distLabel = Instance.new("TextLabel")
+distLabel.Size = UDim2.new(1, -88, 0, 28)
+distLabel.Position = UDim2.new(0, 44, 0, 212)
+distLabel.BackgroundTransparency = 1
+distLabel.Font = Enum.Font.GothamBold
+distLabel.TextSize = 13
+distLabel.TextColor3 = Color3.new(1, 1, 1)
+distLabel.Text = "Dist: " .. MAX_DISTANCE
+distLabel.Parent = panel
+makeSmallBtn("-", 8, 212, function()
+	MAX_DISTANCE = math.max(250, MAX_DISTANCE - 250)
+	distLabel.Text = "Dist: " .. MAX_DISTANCE
+	playClick()
+end)
+makeSmallBtn("+", 150, 212, function()
+	MAX_DISTANCE = math.min(5000, MAX_DISTANCE + 250)
+	distLabel.Text = "Dist: " .. MAX_DISTANCE
+	playClick()
+end)
+
+local nameBtn   = makeSubToggle("Name",   120)
+local healthBtn = makeSubToggle("Health", 154)
+local tracerBtn = makeSubToggle("Tracer", 188)
+local subState  = { name = true, health = true, tracer = false }
+
+local function linkSub(btn, key)
+	track(btn.Activated:Connect(function()
+		playClick()
+		subState[key] = not subState[key]
+		btn.Text = "● " .. key:sub(1,1):upper() .. key:sub(2) .. ": " .. (subState[key] and "ON" or "OFF")
+		btn.TextColor3 = subState[key] and Color3.fromRGB(100, 255, 160) or Color3.fromRGB(180, 180, 180)
+	end))
+end
+linkSub(nameBtn, "name")
+linkSub(healthBtn, "health")
+linkSub(tracerBtn, "tracer")
+
+local scanStatus = Instance.new("TextLabel")
+scanStatus.Position = UDim2.new(0, 8, 0, 248)
+scanStatus.Size = UDim2.new(1, -16, 0, 24)
+scanStatus.BackgroundTransparency = 1
+scanStatus.Font = Enum.Font.Code
+scanStatus.TextSize = 11
+scanStatus.TextColor3 = Color3.fromRGB(180, 180, 180)
+scanStatus.Text = "scanning..."
+scanStatus.Parent = panel
+
+-- ===== CORNER BOX =====
+local function makeCornerBox(parent)
+	local parts = {}
+	for i = 1, 8 do
+		local f = Instance.new("Frame")
+		f.BackgroundColor3 = Color3.new(1, 1, 1)
+		f.BorderSizePixel = 0
+		f.Parent = parent
+		parts[i] = f
+	end
+	return parts
+end
+
+local function updateCornerBox(parts, x, y, w, h, col, thick)
+	thick = thick or 2
+	local cw = math.max(w * CORNER_LEN, 6)
+	local ch = math.max(h * CORNER_LEN, 6)
+	parts[1].Position = UDim2.fromOffset(x, y)
+	parts[1].Size = UDim2.fromOffset(cw, thick)
+	parts[2].Position = UDim2.fromOffset(x, y)
+	parts[2].Size = UDim2.fromOffset(thick, ch)
+	parts[3].Position = UDim2.fromOffset(x + w - cw, y)
+	parts[3].Size = UDim2.fromOffset(cw, thick)
+	parts[4].Position = UDim2.fromOffset(x + w - thick, y)
+	parts[4].Size = UDim2.fromOffset(thick, ch)
+	parts[5].Position = UDim2.fromOffset(x, y + h - thick)
+	parts[5].Size = UDim2.fromOffset(cw, thick)
+	parts[6].Position = UDim2.fromOffset(x, y + h - ch)
+	parts[6].Size = UDim2.fromOffset(thick, ch)
+	parts[7].Position = UDim2.fromOffset(x + w - cw, y + h - thick)
+	parts[7].Size = UDim2.fromOffset(cw, thick)
+	parts[8].Position = UDim2.fromOffset(x + w - thick, y + h - ch)
+	parts[8].Size = UDim2.fromOffset(thick, ch)
+	for i = 1, 8 do parts[i].BackgroundColor3 = col end
+end
+
+local function hideCornerBox(parts)
+	for i = 1, 8 do parts[i].Visible = false end
+end
+
+local function showCornerBox(parts)
+	for i = 1, 8 do parts[i].Visible = true end
+end
+
+-- ===== TRACER =====
+local function updateTracer(tracer, tx, ty, col)
+	local cam = Workspace.CurrentCamera
+	local vs = cam.ViewportSize
+	local from = Vector2.new(vs.X / 2, vs.Y)
+	local to = Vector2.new(tx, ty)
+	local dir = to - from
+	local len = dir.Magnitude
+	tracer.Position = UDim2.fromOffset((from.X + to.X) / 2, (from.Y + to.Y) / 2)
+	tracer.Size = UDim2.fromOffset(1.5, len)
+	tracer.Rotation = math.deg(math.atan2(dir.Y, dir.X)) - 90
+	tracer.BackgroundColor3 = col
+	tracer.Visible = true
+end
+
+-- ===== RAYCAST =====
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+local function isVisible(cam, pos, model)
+	local myChar = me.Character
+	rayParams.FilterDescendantsInstances = myChar and { myChar } or {}
+	local o = cam.CFrame.Position
+	local hit = Workspace:Raycast(o, pos - o, rayParams)
+	return hit == nil or hit.Instance:IsDescendantOf(model)
+end
+
+-- ===== ESP OBJECTS =====
+local boxes = {}
+local hueMap = {}
+local hueCounter = 0
+
+local function clearAll()
+	for m, o in pairs(boxes) do
+		for i = 1, 8 do if o.corners[i] then o.corners[i]:Destroy() end end
+		if o.label then o.label:Destroy() end
+		if o.hpbg then o.hpbg:Destroy() end
+		if o.tracer then o.tracer:Destroy() end
+		boxes[m] = nil
+		hueMap[m] = nil
+	end
+end
+
+local function getESP(model)
+	local o = boxes[model]
+	if o then return o end
+	hueCounter = (hueCounter + 0.07) % 1
+	hueMap[model] = hueCounter
+	local corners = makeCornerBox(gui)
+	local label = Instance.new("TextLabel")
+	label.AnchorPoint = Vector2.new(0.5, 1)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBold
+	label.TextSize = 12
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.TextStrokeTransparency = 0.3
+	label.Size = UDim2.fromOffset(190, 30)
+	label.Parent = gui
+	local hpbg = Instance.new("Frame")
+	hpbg.BackgroundColor3 = Color3.new(0, 0, 0)
+	hpbg.BorderSizePixel = 0
+	hpbg.Parent = gui
+	local hp = Instance.new("Frame")
+	hp.BackgroundColor3 = Color3.fromRGB(0, 220, 80)
+	hp.BorderSizePixel = 0
+	hp.AnchorPoint = Vector2.new(0, 1)
+	hp.Parent = hpbg
+	local tracer = Instance.new("Frame")
+	tracer.AnchorPoint = Vector2.new(0.5, 0.5)
+	tracer.BackgroundTransparency = 0.4
+	tracer.BorderSizePixel = 0
+	tracer.Visible = false
+	tracer.Parent = gui
+	o = { corners = corners, label = label, hpbg = hpbg, hp = hp, tracer = tracer }
+	boxes[model] = o
+	return o
+end
+
+local function hideESP(model)
+	local o = boxes[model]
+	if not o then return end
+	hideCornerBox(o.corners)
+	o.label.Visible = false
+	o.hpbg.Visible = false
+	o.tracer.Visible = false
+end
+
+-- ===== TARGETS =====
+local targets = {}
+local function scan()
+	local list, np, nn = {}, 0, 0
+	for _, d in ipairs(Workspace:GetDescendants()) do
+		if d:IsA("Humanoid") and d.Health > 0 and d.Parent ~= me.Character then
+			local model = d.Parent
+			local plr = Players:GetPlayerFromCharacter(model)
+			if plr or INCLUDE_NPCS then
+				local root = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChild("Torso")
+					or model:FindFirstChild("UpperTorso") or model:FindFirstChildWhichIsA("BasePart")
+				if root then
+					list[#list + 1] = { model = model, hum = d, root = root, plr = plr }
+					if plr then np += 1 else nn += 1 end
+				end
+			end
+		end
+	end
+	targets = list
+	local seen, nearD = 0, math.huge
+	local myRoot = me.Character and me.Character:FindFirstChild("HumanoidRootPart")
+	if myRoot then
+		for _, t in ipairs(list) do
+			local d = (t.root.Position - myRoot.Position).Magnitude
+			if d <= MAX_DISTANCE then seen += 1 if d < nearD then nearD = d end end
+		end
+	end
+	stats.Text = string.format(" P: %d  NPC: %d  Seen: %d  Near: %ds", np, nn, seen,
+		nearD < math.huge and math.floor(nearD) or 0)
+	scanStatus.Text = string.format("total: %d | players: %d | npc: %d", np + nn, np, nn)
+end
+
+local running = true
+task.spawn(function()
+	while running do
+		pcall(scan)
+		task.wait(0.5)
+	end
+end)
+
+-- ===== ESP STEP =====
+local function espStep()
+	local cam = Workspace.CurrentCamera
+	local myRoot = me.Character and me.Character:FindFirstChild("HumanoidRootPart")
+	local seen = {}
+
+	for _, t in ipairs(targets) do
+		local root = t.root
+		if not root.Parent or t.hum.Health <= 0 then
+			hideESP(t.model)
+		else
+			local pos = root.Position
+			local dist = (pos - (myRoot and myRoot.Position or cam.CFrame.Position)).Magnitude
+			local top = cam:WorldToViewportPoint(pos + Vector3.new(0, 3, 0))
+			local bot = cam:WorldToViewportPoint(pos - Vector3.new(0, 3.2, 0))
+			if dist > MAX_DISTANCE or top.Z <= 0 or bot.Z <= 0 then
+				hideESP(t.model)
+			else
+				seen[t.model] = true
+				local o = getESP(t.model)
+				local col
+				if RAINBOW then
+					col = rainbowColor(hueMap[t.model] or 0)
+				elseif t.plr == nil then
+					col = NPC_COLOR
+				elseif TEAM_CHECK and t.plr.Team ~= nil and t.plr.Team == me.Team and #game:GetService("Teams"):GetChildren() > 1 then
+					col = TEAM_COLOR
+				else
+					col = isVisible(cam, pos, t.model) and Color3.fromRGB(255, 100, 100) or Color3.fromRGB(255, 60, 60)
+				end
+
+				local h = math.max(math.abs(bot.Y - top.Y), 8)
+				local w = h * 0.55
+				local sx, sy = top.X - w / 2, top.Y
+
+				updateCornerBox(o.corners, sx, sy, w, h, col, 2)
+				showCornerBox(o.corners)
+
+				if subState.name then
+					o.label.Text = t.model.Name .. " " .. math.floor(dist) .. "m"
+					o.label.TextColor3 = col
+					o.label.Position = UDim2.fromOffset(top.X, sy - 2)
+					o.label.Visible = true
+				else
+					o.label.Visible = false
+				end
+
+				if subState.health then
+					local frac = math.clamp(t.hum.Health / math.max(t.hum.MaxHealth, 1), 0, 1)
+					o.hpbg.Position = UDim2.fromOffset(sx - 5, sy)
+					o.hpbg.Size = UDim2.fromOffset(3, h)
+					o.hpbg.Visible = true
+					o.hp.Size = UDim2.new(1, 0, frac, 0)
+					o.hp.Position = UDim2.new(0, 0, 1 - frac, 0)
+					o.hp.BackgroundColor3 = Color3.fromRGB(math.floor((1 - frac) * 255), math.floor(frac * 200), 50)
+				else
+					o.hpbg.Visible = false
+				end
+
+				if subState.tracer then
+					updateTracer(o.tracer, top.X, sy, col)
+				else
+					o.tracer.Visible = false
+				end
+			end
+		end
+	end
+
+	for m in pairs(boxes) do
+		if not seen[m] then hideESP(m) end
+	end
+end
+
+RunService:BindToRenderStep("AmerESP", Enum.RenderPriority.Camera.Value + 2, function()
+	if espOn then pcall(espStep) end
+end)
+
+-- ===== TOGGLE =====
+local function toggleESP()
+	playClick()
+	espOn = not espOn
+	espBtn.Text = "ESP: " .. (espOn and "ON" or "OFF")
+	espBtn.BackgroundColor3 = espOn and ON_COLOR or OFF_COLOR
+	espBtnStroke.Color = espOn and rainbowColor(0.3) or Color3.fromRGB(255, 60, 60)
+	if not espOn then clearAll() end
+end
+track(espBtn.Activated:Connect(toggleESP))
+track(UIS.InputBegan:Connect(function(i, gp)
+	if not gp and i.KeyCode == Enum.KeyCode.F1 then toggleESP() end
+end))
+
+-- ===== UNLOAD =====
+env.AmerLiteUnload = function()
+	running = false
+	pcall(function() RunService:UnbindFromRenderStep("AmerESP") end)
+	for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
+	clearAll()
+	pcall(function() gui:Destroy() end)
+	env.AmerLiteUnload = nil
+end
